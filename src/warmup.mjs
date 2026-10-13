@@ -4,6 +4,7 @@
 // shared lock (`withDbLock`) serialises the face-roster warm, the boot image warm, and every live
 // refresh into one at-a-time queue. Kicked off the boot critical path (they don't gate `ready`).
 import fs from "node:fs";
+import { normalizePushImage } from "@mega-yfue/eufy-sdk";
 import path from "node:path";
 import { rosterEntry, firstJsonObject } from "./faces.mjs";
 import { storedThumbnailSeenAt } from "./stored-thumbnail.mjs";
@@ -275,11 +276,22 @@ export function createWarmup(ctx) {
     return { covers: newest, recordCount: records.length, seen };
   }
 
-  /** Request one on-HomeBase cover path over P2P and return its JPEG bytes (≤8s), or undefined. */
-  async function fetchImage(session, filePath, accountId) {
+  /** A station's `p2p_did`, the key a stored image's `eufysecurity:` wrapper is decoded with. */
+  function p2pDidOf(devs, stationSn) {
+    const d = devs.find((x) => (x.sn ?? x.serialNumber) === stationSn);
+    return d?.p2pDid ?? d?.raw?.p2p_did;
+  }
+
+  /**
+   * Request one on-HomeBase cover path over P2P and return its JPEG bytes (≤8s), or undefined. A
+   * HomeBase 2 answers with the image inside the `eufysecurity:` wrapper, which is unwrapped with the
+   * station's `p2p_did` before the JPEG check.
+   */
+  async function fetchImage(session, filePath, accountId, p2pDid) {
     const images = new Map();
     const onImage = ({ file, data }) => {
-      if (data?.[0] === 0xff && data?.[1] === 0xd8) images.set(file, data);
+      const image = data ? normalizePushImage(data, p2pDid) : data;
+      if (image?.[0] === 0xff && image?.[1] === 0xd8) images.set(file, image);
     };
     session.on("image", onImage);
     session.requestImage(filePath, { accountId });
@@ -347,8 +359,9 @@ export function createWarmup(ctx) {
           if (!covers.size) continue;
 
           for (const [dsn, { path: filePath }] of covers) {
-            const data = await fetchImage(session, filePath, accountId);
+            const data = await fetchImage(session, filePath, accountId, p2pDidOf(devs, stationSn));
             if (data) noteFetched(covers.get(dsn).rec, filePath);
+            else ctx.eventLog?.(`warm: ${dsn} — cover fetch returned no image (crop=${filePath.split("/").pop()})`);
             if (data && persistIfChanged(dsn, data)) {
               console.log(`[bridge] warmed last-event image for ${dsn} (${data.length}B, local)`);
             }
@@ -394,7 +407,7 @@ export function createWarmup(ctx) {
           }
           const filePath = entry.path;
           const crop = filePath.split("/").pop();
-          const data = await fetchImage(session, filePath, accountId);
+          const data = await fetchImage(session, filePath, accountId, p2pDidOf(devs, stationSn));
           if (!data) {
             ctx.eventLog?.(`local refresh: ${sn} — cover fetch returned no image (crop=${crop})`);
             return false;

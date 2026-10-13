@@ -7,7 +7,19 @@ import { EventEmitter } from "node:events";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { createCipheriv } from "node:crypto";
+import { getImageKey } from "@mega-yfue/eufy-sdk";
 import { createWarmup } from "../src/warmup.mjs";
+
+const P2P_DID = "EUPREMB-012345-ABCDE";
+/** A JPEG inside the `eufysecurity:` wrapper a HomeBase 2 answers a stored-image request with. */
+function wrapV1(jpeg, serial = "T8010P0000000001", code = "0123456789") {
+  const key = Buffer.from(getImageKey(serial, P2P_DID, code), "utf-8").subarray(0, 16);
+  const c = createCipheriv("aes-128-ecb", key, null);
+  c.setAutoPadding(false);
+  const head = Buffer.concat([c.update(jpeg.subarray(0, 256)), c.final()]);
+  return Buffer.concat([Buffer.from(`eufysecurity:${serial}:${code}:`, "latin1"), head, jpeg.subarray(256)]);
+}
 
 /** A station session: `direct` answers the 10000 read (rows), `latest` answers 10013 (entries). */
 function fakeStation({ direct, latest }) {
@@ -21,10 +33,12 @@ function fakeStation({ direct, latest }) {
     if (reply) setTimeout(() => s.emit("dbChunk", { text: JSON.stringify(reply) }), 0);
   };
   s.dropImages = 0;
+  s.wrapImages = false;
   s.requestImage = (file) => {
     s.images.push(file);
     if (s.dropImages-- > 0) return;
-    setTimeout(() => s.emit("image", { file, data: Buffer.from([0xff, 0xd8, ...Buffer.from(file)]) }), 0);
+    const jpeg = Buffer.concat([Buffer.from([0xff, 0xd8]), Buffer.from(file), Buffer.alloc(300, 0x41)]);
+    setTimeout(() => s.emit("image", { file, data: s.wrapImages ? wrapV1(jpeg) : jpeg }), 0);
   };
   return s;
 }
@@ -37,7 +51,10 @@ function setup(station) {
     eventLog: (m) => log.push(m),
     broadcast: () => {},
     state: { faceNames: new Map() },
-    eufy: { getP2pSessions: () => new Map([["HB2", station]]), getDevices: async () => [] },
+    eufy: {
+      getP2pSessions: () => new Map([["HB2", station]]),
+      getDevices: async () => [{ sn: "HB2", p2pDid: P2P_DID }],
+    },
   });
   return { warm, log, file: path.join(dir, "last-event-CAM1.jpg") };
 }
@@ -74,7 +91,13 @@ test("a station silent on the direct read is asked latest-info, and a crop is ta
 
   assert.equal(await run(() => warm.refreshLastEventImageFor("CAM1")), true);
   assert.deepEqual(station.asked, ["10000@255", "10000@255", "10013@0"]);
-  assert.deepEqual(fs.readFileSync(file).subarray(2).toString(), "/media/mmcblk0p1/video/20261013100000_c01.jpg");
+  assert.equal(
+    fs
+      .readFileSync(file)
+      .subarray(2, 2 + "/media/mmcblk0p1/video/20261013100000_c01.jpg".length)
+      .toString(),
+    "/media/mmcblk0p1/video/20261013100000_c01.jpg",
+  );
   assert.ok(log.includes("latest-info: CAM1 event_count=41 crop=20261013100000_c01.jpg (first seen, taken)"));
 
   assert.equal(await run(() => warm.refreshLastEventImageFor("CAM1")), false);
@@ -83,7 +106,13 @@ test("a station silent on the direct read is asked latest-info, and a crop is ta
 
   latest = latestFor("/media/mmcblk0p1/video/20261013110000_c01.jpg", 42);
   assert.equal(await run(() => warm.refreshLastEventImageFor("CAM1")), true);
-  assert.deepEqual(fs.readFileSync(file).subarray(2).toString(), "/media/mmcblk0p1/video/20261013110000_c01.jpg");
+  assert.equal(
+    fs
+      .readFileSync(file)
+      .subarray(2, 2 + "/media/mmcblk0p1/video/20261013110000_c01.jpg".length)
+      .toString(),
+    "/media/mmcblk0p1/video/20261013110000_c01.jpg",
+  );
   assert.ok(log.includes("latest-info: CAM1 event_count=42 crop=20261013110000_c01.jpg (advanced, taken)"));
 });
 
@@ -126,4 +155,16 @@ test("a station silent on both forms stops being asked latest-info after three t
   for (let i = 0; i < 5; i++) await run(() => warm.refreshLastEventImageFor("CAM1"));
   assert.equal(station.asked.filter((a) => a === "10013@0").length, 3);
   assert.ok(log.includes("history query: no records parsed (raw 0B received; latest-info unanswered too)"));
+});
+
+test("a cover answered inside the eufysecurity: wrapper is unwrapped and persisted as a JPEG", async () => {
+  const path = "/media/mmcblk0p1/video/20261013100000_c01.jpg";
+  const station = fakeStation({ latest: latestFor(path, 41) });
+  station.wrapImages = true;
+  const { warm, file } = setup(station);
+
+  assert.equal(await run(() => warm.refreshLastEventImageFor("CAM1")), true);
+  const written = fs.readFileSync(file);
+  assert.deepEqual([...written.subarray(0, 2)], [0xff, 0xd8]);
+  assert.equal(written.subarray(2, 2 + path.length).toString(), path);
 });
