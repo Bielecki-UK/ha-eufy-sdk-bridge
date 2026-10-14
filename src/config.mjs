@@ -151,6 +151,8 @@ export function loadConfig(env = process.env) {
   // pushStore the SDK falls back to MemoryFcmStore and re-registers a fresh token on every restart —
   // wasted work, and it's what makes a same-identity collision bite rather than self-correct (issue #30).
   cfg.pushSession = path.join(path.dirname(cfg.session), ".eufy-fcm.json");
+  // This install's stable identity (see bridge-id.mjs), in the same data dir.
+  cfg.bridgeIdFile = path.join(path.dirname(cfg.session), ".bridge-id");
 
   const DEBUG = truthy(env.BRIDGE_DEBUG);
   const DEBUG_P2P = truthy(env.BRIDGE_DEBUG_P2P);
