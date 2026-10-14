@@ -44,7 +44,7 @@ export function createWsServer(ctx, httpServer) {
     clients.add(ws);
     // On connect, tell the client the schema AND the current auth state, so a frontend knows immediately
     // whether it must drive a 2FA/captcha step before anything else works.
-    send(ws, { event: "hello", schemaVersion: SCHEMA_VERSION, auth: ctx.authStatus() });
+    send(ws, { event: "hello", schemaVersion: SCHEMA_VERSION, bridgeId: ctx.bridgeId, auth: ctx.authStatus() });
     ws.on("close", () => clients.delete(ws));
     ws.on("message", (raw) => handleMessage(ws, raw).catch((e) => console.error("[bridge] ws:", e)));
   });
@@ -91,7 +91,7 @@ export function createWsServer(ctx, httpServer) {
       switch (cmd) {
         // ── auth ──
         case "auth.status":
-          return reply({ auth: ctx.authStatus() });
+          return reply({ auth: ctx.authStatus(), bridgeId: ctx.bridgeId });
         case "auth.submit": {
           // A 2FA code (`code`) or a captcha answer (`captcha`). The pending id/token is held in the SDK.
           if (msg.captcha != null) await ctx.applyLogin(await eufy.solveCaptcha(String(msg.captcha)));

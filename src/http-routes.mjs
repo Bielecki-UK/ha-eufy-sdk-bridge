@@ -103,6 +103,7 @@ export function createHttpHandler(ctx) {
       return json(res, 200, {
         ok: true,
         schemaVersion: SCHEMA_VERSION,
+        bridgeId: ctx.bridgeId, // stable per install: the same bridge under another address has the same id
         auth: ctx.authStatus(),
         sessionLost: flags.sessionLost, // cloud token kicked/expired since boot → re-auth in progress/needed
         streaming: [...streaming],

@@ -41,8 +41,12 @@ Ask what the login needs right now.
 // →
 { "id": 1, "cmd": "auth.status" }
 // ←
-{ "id": 1, "ok": true, "auth": { "state": "ok" } }
+{ "id": 1, "ok": true, "auth": { "state": "ok" }, "bridgeId": "3f2a…" }
 ```
+
+`bridgeId` is this bridge install's stable id (a UUID kept in the data dir beside the session file). It is
+the same whatever address the bridge is reached at, so a host can tell the same bridge added twice (e.g.
+discovered at `172.30.32.1` and added by LAN IP) from two bridges. `hello` and `/healthz` carry it too.
 
 `auth` is one of:
 
@@ -388,7 +392,7 @@ Complete a pending Solix 2FA (only when `state == "2fa"`). The code is never log
 | `ready` | `{ schemaVersion }`                     | login complete + devices/go2rtc up |
 
 ```json
-{ "event": "hello", "schemaVersion": 1, "auth": { "state": "ok" } }
+{ "event": "hello", "schemaVersion": 1, "bridgeId": "3f2a…", "auth": { "state": "ok" } }
 { "event": "auth", "state": "require_2fa", "method": "email" }
 { "event": "ready", "schemaVersion": 1 }
 ```
@@ -439,12 +443,12 @@ Fired when a camera's live P2P feed opens (`active: true`) or is torn down / idl
 
 ## Sibling HTTP endpoints
 
-| method + path        | returns                                                                                           |
-| -------------------- | ------------------------------------------------------------------------------------------------- |
-| `GET /healthz`       | `{ ok, schemaVersion, auth: { state }, streaming: [sn,…] }` — always available (even before auth) |
-| `GET /snapshot/<sn>` | a JPEG still (`image/jpeg`). _Requires auth._                                                     |
-| `GET /stream/<sn>`   | live Annex-B H.264/H.265 (`video/H264`) — what go2rtc pulls. _Requires auth._                     |
-| `GET /clip/<sn>`     | the latest detection's HomeBase 2 recording (`video/mp4`). _Requires auth._                       |
+| method + path        | returns                                                                                                     |
+| -------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `GET /healthz`       | `{ ok, schemaVersion, bridgeId, auth: { state }, streaming: [sn,…] }` — always available (even before auth) |
+| `GET /snapshot/<sn>` | a JPEG still (`image/jpeg`). _Requires auth._                                                               |
+| `GET /stream/<sn>`   | live Annex-B H.264/H.265 (`video/H264`) — what go2rtc pulls. _Requires auth._                               |
+| `GET /clip/<sn>`     | the latest detection's HomeBase 2 recording (`video/mp4`). _Requires auth._                                 |
 
 The bridge does not infer cloud-poll health from device-event silence; `ok` means the HTTP endpoint answered.
 

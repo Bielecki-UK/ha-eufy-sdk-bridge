@@ -14,6 +14,7 @@
 import http from "node:http";
 import fs from "node:fs";
 import { loadConfig } from "./src/config.mjs";
+import { loadBridgeId } from "./src/bridge-id.mjs";
 import { createState } from "./src/state.mjs";
 import { createEufy } from "./src/client.mjs";
 import { createFaces } from "./src/faces.mjs";
@@ -47,7 +48,7 @@ if (!cfg.email || !cfg.password) {
 // ── assemble ctx ────────────────────────────────────────────────────────────────────────────────────
 const state = createState();
 const eufy = createEufy(config);
-const ctx = { ...config, eufy, state };
+const ctx = { ...config, eufy, state, bridgeId: loadBridgeId(cfg.bridgeIdFile) };
 
 // Each factory reads its cross-module deps off ctx lazily, so this single merge is enough — nothing here
 // is called until login/handlers run, by which point ctx is complete.
