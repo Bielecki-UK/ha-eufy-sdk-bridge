@@ -4,6 +4,7 @@
 // shared lock (`withDbLock`) serialises the face-roster warm, the boot image warm, and every live
 // refresh into one at-a-time queue. Kicked off the boot critical path (they don't gate `ready`).
 import fs from "node:fs";
+import { normalizePushImage } from "@mega-yfue/eufy-sdk";
 import path from "node:path";
 import { rosterEntry, firstJsonObject } from "./faces.mjs";
 import { storedThumbnailSeenAt } from "./stored-thumbnail.mjs";
@@ -139,6 +140,68 @@ export function createWarmup(ctx) {
     return Number.isFinite(t) ? t : 0;
   }
 
+  // Stations that have answered the direct read at least once. Only a station that never has (a
+  // HomeBase 2 sends nothing back to 10000 on either channel) falls back to the latest-info query, so a
+  // station whose direct read merely dropped once never swaps to the older form.
+  const directReadAnswered = new Set();
+  // Per device, the latest-info crop path last seen, and per station, how many latest-info queries in a
+  // row went unanswered (a standalone camera answers neither form; it stops being asked after a few).
+  const latestInfoPath = new Map();
+  const latestInfoSilent = new Map();
+  const LATEST_INFO_MAX_SILENT = 3;
+
+  /**
+   * The latest-info query (inner cmd **10013**, mChannel **0**), as eufy-security-client sends it. It
+   * answers one entry per device, `{device_sn, payload: {crop_hb3_path, event_count}}`, where the direct
+   * read answers nothing at all.
+   *
+   * The crop it names may be a cached "latest" that does not advance with new events, so a device's path
+   * is taken only when it differs from the last one seen, where a taken path counts as seen once its
+   * image is fetched (so a failed fetch is retried); the first one is taken only when no image is on disk
+   * yet. A path that never changes is therefore never persisted over a
+   * newer image. Each entry is logged with its `event_count`, so a log shows whether the path advances.
+   * Answers the records taken, or `undefined` when the station sent no reply. Caller must hold the DB lock.
+   */
+  async function queryLatestInfoCovers(session, accountId, stationSn) {
+    let chunk = "";
+    const onChunk = ({ text }) => (chunk += text);
+    session.on("dbChunk", onChunk);
+    session.queryDatabase("history_record_info", { accountId, innerCmd: 10013, channel: 0 });
+    let obj;
+    for (let i = 0; i < 20 && !Array.isArray(obj?.data); i++) {
+      await sleep(200);
+      obj = firstJsonObject(chunk);
+    }
+    session.off?.("dbChunk", onChunk);
+
+    const entries = Array.isArray(obj?.data) ? obj.data : undefined;
+    if (!entries) {
+      latestInfoSilent.set(stationSn, (latestInfoSilent.get(stationSn) ?? 0) + 1);
+      return undefined;
+    }
+    latestInfoSilent.delete(stationSn);
+    const taken = [];
+    for (const rec of entries) {
+      const dsn = rec?.device_sn;
+      const p = cropPathOf(rec);
+      if (!dsn || !p) continue;
+      const prev = latestInfoPath.get(dsn);
+      const take = prev === undefined ? !fs.existsSync(path.join(eventImageDir, `last-event-${dsn}.jpg`)) : p !== prev;
+      if (!take) latestInfoPath.set(dsn, p); // a taken path counts as seen once its image is fetched
+      ctx.eventLog?.(
+        `latest-info: ${dsn} event_count=${rec.payload?.event_count} crop=${p.split("/").pop()} ` +
+          `(${prev === undefined ? "first seen" : p === prev ? "unchanged" : "advanced"}${take ? ", taken" : ""})`,
+      );
+      if (take) taken.push({ ...rec, viaLatestInfo: true });
+    }
+    return taken;
+  }
+
+  /** Mark a latest-info crop as seen once its image has been fetched. */
+  function noteFetched(rec, filePath) {
+    if (rec?.viaLatestInfo) latestInfoPath.set(rec.device_sn, filePath);
+  }
+
   /**
    * Query each device's LATEST event cover over P2P and return `device_sn -> on-HomeBase cover path`
    * (the plain-JPEG crop the /event-image serves).
@@ -150,9 +213,12 @@ export function createWarmup(ctx) {
    * moved; ch0 also returns nothing on a HomeBase (DB reads live on 255). We then pick, per device, the
    * record with the greatest `start_time` and use its crop path.
    *
+   * A station that has never answered the direct read is asked {@link queryLatestInfoCovers} instead
+   * when this one comes back empty.
+   *
    * Sent twice (the first can be dropped during handshake). Caller must hold the DB lock.
    */
-  async function queryStationCovers(session, accountId) {
+  async function queryStationCovers(session, accountId, stationSn) {
     let chunk = "";
     const onChunk = ({ text }) => (chunk += text);
     session.on("dbChunk", onChunk);
@@ -177,11 +243,18 @@ export function createWarmup(ctx) {
     }
     session.off?.("dbChunk", onChunk);
 
-    const records = parsed?.data ?? firstJsonObject(chunk)?.data ?? [];
-    if (!records.length) {
+    let records = parsed?.data ?? firstJsonObject(chunk)?.data ?? [];
+    let received = `raw ${chunk.length}B received`;
+    if (chunk.length) directReadAnswered.add(stationSn);
+    else if (!directReadAnswered.has(stationSn) && (latestInfoSilent.get(stationSn) ?? 0) < LATEST_INFO_MAX_SILENT) {
+      const latest = await queryLatestInfoCovers(session, accountId, stationSn);
+      if (latest) [records, received] = [latest, undefined];
+      else received += "; latest-info unanswered too";
+    }
+    if (!records.length && received) {
       // Diagnostic: distinguish "response never arrived" (chunk empty) from "arrived but unparseable /
       // no data" (chunk large) so a recurring failure points straight at transport vs shape.
-      ctx.eventLog?.(`history query: no records parsed (raw ${chunk.length}B received)`);
+      ctx.eventLog?.(`history query: no records parsed (${received})`);
     }
     // Keep the newest record per device (max start_time), then take its crop path. Ties (or a firmware
     // that omits start_time) fall back to last-wins, matching the old behaviour for that degenerate case.
@@ -208,11 +281,22 @@ export function createWarmup(ctx) {
     return { covers: newest, recordCount: records.length, seen };
   }
 
-  /** Request one on-HomeBase cover path over P2P and return its JPEG bytes (≤8s), or undefined. */
-  async function fetchImage(session, filePath, accountId) {
+  /** A station's `p2p_did`, the key a stored image's `eufysecurity:` wrapper is decoded with. */
+  function p2pDidOf(devs, stationSn) {
+    const d = devs.find((x) => (x.sn ?? x.serialNumber) === stationSn);
+    return d?.p2pDid ?? d?.raw?.p2p_did;
+  }
+
+  /**
+   * Request one on-HomeBase cover path over P2P and return its JPEG bytes (≤8s), or undefined. A
+   * HomeBase 2 answers with the image inside the `eufysecurity:` wrapper, which is unwrapped with the
+   * station's `p2p_did` before the JPEG check.
+   */
+  async function fetchImage(session, filePath, accountId, p2pDid) {
     const images = new Map();
     const onImage = ({ file, data }) => {
-      if (data?.[0] === 0xff && data?.[1] === 0xd8) images.set(file, data);
+      const image = data ? normalizePushImage(data, p2pDid) : data;
+      if (image?.[0] === 0xff && image?.[1] === 0xd8) images.set(file, image);
     };
     session.on("image", onImage);
     session.requestImage(filePath, { accountId });
@@ -272,15 +356,17 @@ export function createWarmup(ctx) {
       try {
         const devs = await eufy.getDevices();
         const accountId = await accountIdOf(devs);
-        for (const [, session] of await awaitSessions()) {
+        for (const [stationSn, session] of await awaitSessions()) {
           for (let i = 0; i < 30 && !session.isConnected; i++) await sleep(500); // await handshake
           if (!session.isConnected) continue;
 
-          const { covers } = await queryStationCovers(session, accountId);
+          const { covers } = await queryStationCovers(session, accountId, stationSn);
           if (!covers.size) continue;
 
           for (const [dsn, { path: filePath }] of covers) {
-            const data = await fetchImage(session, filePath, accountId);
+            const data = await fetchImage(session, filePath, accountId, p2pDidOf(devs, stationSn));
+            if (data) noteFetched(covers.get(dsn).rec, filePath);
+            else ctx.eventLog?.(`warm: ${dsn} — cover fetch returned no image (crop=${filePath.split("/").pop()})`);
             if (data && persistIfChanged(dsn, data)) {
               console.log(`[bridge] warmed last-event image for ${dsn} (${data.length}B, local)`);
             }
@@ -307,9 +393,9 @@ export function createWarmup(ctx) {
         if (!sessions.size) return false;
         const devs = await eufy.getDevices();
         const accountId = await accountIdOf(devs);
-        for (const [, session] of sessions) {
+        for (const [stationSn, session] of sessions) {
           if (!session.isConnected) continue;
-          const { covers, recordCount, seen } = await queryStationCovers(session, accountId);
+          const { covers, recordCount, seen } = await queryStationCovers(session, accountId, stationSn);
           const entry = covers.get(sn);
           if (!entry) {
             // Diagnostic: did this station return records for this device at all? If it has a newer record
@@ -326,11 +412,12 @@ export function createWarmup(ctx) {
           }
           const filePath = entry.path;
           const crop = filePath.split("/").pop();
-          const data = await fetchImage(session, filePath, accountId);
+          const data = await fetchImage(session, filePath, accountId, p2pDidOf(devs, stationSn));
           if (!data) {
             ctx.eventLog?.(`local refresh: ${sn} — cover fetch returned no image (crop=${crop})`);
             return false;
           }
+          noteFetched(entry.rec, filePath);
           if (persistIfChanged(sn, data)) {
             ctx.eventLog?.(
               `local refresh: ${sn} → last-event image updated (${data.length}B, local) ` +
