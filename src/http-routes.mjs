@@ -8,9 +8,10 @@ import { streamClientFor, dropStreamClient, isSupersededStreamClient } from "../
 import { createLiveStillTap } from "./live-still.mjs";
 import { onBatteryPower } from "./power.mjs";
 import { storedThumbnailSeenAt } from "./stored-thumbnail.mjs";
+import { redactSecrets } from "./redact.mjs";
 
 function json(res, code, body) {
-  const s = JSON.stringify(body);
+  const s = redactSecrets(JSON.stringify(body));
   res.writeHead(code, { "content-type": "application/json", "content-length": Buffer.byteLength(s) });
   res.end(s);
 }
