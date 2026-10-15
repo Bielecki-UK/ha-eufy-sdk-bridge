@@ -20,6 +20,7 @@
   },
   "dependencies": {
     "@mega-yfue/eufy-sdk": "0.4.0",
+    "node-datachannel": "^0.33.4",
     "ws": "^8.18.0"
   },
   "devDependencies": {
