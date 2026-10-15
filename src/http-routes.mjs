@@ -306,12 +306,12 @@ export function createHttpHandler(ctx) {
         return json(res, 503, {
           error: "stream idle-suspended — no recent detection, waiting for motion or a fresh viewer",
         });
-      // Failure-backoff: a recent open failed (P2P unreachable), and go2rtc retries every ~30s. Serve a
+      // Failure-backoff: a recent open failed, and go2rtc retries every ~30s. Serve a
       // fast 503 without opening a P2P session, so a camera that can't connect isn't woken on every retry.
       const backoff = ctx.streamBackoffMs?.(sn) ?? 0;
       if (backoff > 0)
         return json(res, 503, {
-          error: `stream backing off after a failed open — retry in ${Math.ceil(backoff / 1000)}s (P2P unreachable)`,
+          error: `stream backing off after a failed open (${ctx.state.streamBackoff?.get(sn)?.reason ?? "unknown error"}) — retry in ${Math.ceil(backoff / 1000)}s`,
         });
       // The viewer can leave while the session is still opening (login, P2P connect, warm-up). Watch for
       // that from the start: a feed opened for nobody would hold the camera's live source open and report
@@ -395,7 +395,7 @@ export function createHttpHandler(ctx) {
         // Arm backoff so the next go2rtc retry doesn't wake the radio again — once per lease.
         if (!lease || !failedLeases.has(lease)) {
           if (lease) failedLeases.add(lease);
-          ctx.noteStreamFailure?.(sn);
+          ctx.noteStreamFailure?.(sn, String(e?.message ?? e));
         }
         // Never reuse a session that just failed (see dropStreamClient in streams.mjs) — but don't pull it
         // from under another request still streaming on it; drop it when that one ends.

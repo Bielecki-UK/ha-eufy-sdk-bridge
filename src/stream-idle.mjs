@@ -41,13 +41,15 @@ export function createStreamIdle(ctx) {
   }
 
   /** Record a failed /stream open and arm exponential backoff (base doubles per streak, capped). */
-  function noteStreamFailure(sn) {
+  function noteStreamFailure(sn, reason) {
     if (!sn || !cfg.streamFailBackoffMs) return;
     const streak = (streamBackoff.get(sn)?.streak ?? 0) + 1;
     const window = Math.min(cfg.streamFailBackoffMs * 2 ** (streak - 1), STREAM_FAIL_BACKOFF_MAX_MS);
-    streamBackoff.set(sn, { until: Date.now() + window, streak });
+    // The open can fail for any reason (no P2P route, an RTC sign refused, a session that never served
+    // video), so the log and the backoff 503 carry the error itself rather than guessing at a cause.
+    streamBackoff.set(sn, { until: Date.now() + window, streak, reason });
     console.log(
-      `[bridge] stream(${sn}) open failed (#${streak}) — backing off reopen ${Math.round(window / 1000)}s (P2P unreachable)`,
+      `[bridge] stream(${sn}) open failed (#${streak}): ${reason ?? "unknown error"} — backing off reopen ${Math.round(window / 1000)}s`,
     );
   }
 
