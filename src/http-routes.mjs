@@ -66,9 +66,9 @@ export function createHttpHandler(ctx) {
       const data = await r.json();
       const consumers = (data?.consumers ?? data?.[sn]?.consumers ?? []).filter(Boolean);
       if (!consumers.length) {
-        ctx.eventLog?.(
-          `/stream ${sn} — go2rtc reports NO consumers (a leftover ffmpeg retry / probe, not a live viewer)`,
-        );
+        // go2rtc opens the source before it registers the viewer that asked for it, so a cold start
+        // with a real viewer lands here too; only a request that never gains a consumer is a stray.
+        ctx.eventLog?.(`/stream ${sn} — go2rtc lists no consumer yet (normal on a cold start)`);
         return;
       }
       for (const c of consumers) {
