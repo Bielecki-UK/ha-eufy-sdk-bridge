@@ -38,3 +38,20 @@ test("the rtspStream auto-off skips a mains camera and still turns a battery one
   await idle.rtspIdleSweep();
   assert.deepEqual(writes, [["BATT", "rtspStream", false]]);
 });
+
+test("the device summary carries each camera's power tier, and none for a non-camera", async () => {
+  const { createDeviceView } = await import("../src/device-view.mjs");
+  const manifests = {
+    MAINS: { sn: "MAINS", model: "T8423", capabilities: ["camera", "light", "battery"] },
+    BATT: { sn: "BATT", model: "T8170", capabilities: ["camera", "battery"] },
+    SENSOR: { sn: "SENSOR", model: "T8900", capabilities: ["contact", "battery"] },
+  };
+  const device = (sn) => ({ describe: () => ({ details: [], ...manifests[sn] }), getProperties: () => ({}) });
+  const view = createDeviceView({
+    eufy: { getDevice: async (sn) => device(sn) },
+    state: { streaming: new Set() },
+  });
+  assert.equal((await view.describeDevice("MAINS")).power, "wired");
+  assert.equal((await view.describeDevice("BATT")).power, "battery");
+  assert.equal((await view.describeDevice("SENSOR")).power, undefined);
+});
