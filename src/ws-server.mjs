@@ -5,6 +5,7 @@
 import { WebSocketServer } from "ws";
 import { listLightEffects } from "@mega-yfue/eufy-sdk";
 import { SOLIX_CONTROLS, SOLIX_DISABLED } from "./solix.mjs";
+import { redactSecrets } from "./redact.mjs";
 
 // Commands that require an authenticated eufy session — gated in one place before dispatch. (auth.* and
 // solix.* run before this gate, so a client can drive 2FA/captcha and Solix while eufy is still pending.)
@@ -28,10 +29,10 @@ export function createWsServer(ctx, httpServer) {
   const { flags, clients } = ctx.state;
 
   const send = (ws, obj) => {
-    if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(obj));
+    if (ws.readyState === ws.OPEN) ws.send(redactSecrets(JSON.stringify(obj)));
   };
   const broadcast = (obj) => {
-    const s = JSON.stringify(obj);
+    const s = redactSecrets(JSON.stringify(obj));
     for (const ws of clients) if (ws.readyState === ws.OPEN) ws.send(s);
   };
 

@@ -14,6 +14,8 @@
 import http from "node:http";
 import fs from "node:fs";
 import { loadConfig } from "./src/config.mjs";
+import { checkWebRtcLibrary } from "./src/webrtc-check.mjs";
+import { installConsoleRedaction } from "./src/redact.mjs";
 import { loadBridgeId } from "./src/bridge-id.mjs";
 import { createState } from "./src/state.mjs";
 import { createEufy } from "./src/client.mjs";
@@ -30,6 +32,8 @@ import { createHttpHandler } from "./src/http-routes.mjs";
 import { createWsServer } from "./src/ws-server.mjs";
 import { closeStreamClients } from "./streams.mjs";
 
+// Before anything logs: no echoed credential reaches the console (see redact.mjs).
+installConsoleRedaction();
 const config = loadConfig();
 const { cfg, DEBUG, DEBUG_P2P, EVENT_LOG, eventImageDir } = config;
 
@@ -40,6 +44,8 @@ if (EVENT_LOG)
   console.log(
     '[bridge] event log ON — "[bridge:event]" lines trace each push event + "Last event" image fetch (set BRIDGE_EVENT_LOG=0 to silence)',
   );
+// Say up front whether the T9000's WebRTC library loads on this platform (see webrtc-check.mjs).
+void checkWebRtcLibrary().then(({ ok, line }) => (ok ? console.log(line) : console.warn(line)));
 if (!cfg.email || !cfg.password) {
   console.error("[bridge] EUFY_EMAIL and EUFY_PASSWORD are required");
   process.exit(1);

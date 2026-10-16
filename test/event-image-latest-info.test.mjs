@@ -38,7 +38,8 @@ function fakeStation({ direct, latest }) {
     s.images.push(file);
     if (s.dropImages-- > 0) return;
     const jpeg = Buffer.concat([Buffer.from([0xff, 0xd8]), Buffer.from(file), Buffer.alloc(300, 0x41)]);
-    setTimeout(() => s.emit("image", { file, data: s.wrapImages ? wrapV1(jpeg) : jpeg }), 0);
+    const data = s.rawImage ?? (s.wrapImages ? wrapV1(jpeg) : jpeg);
+    setTimeout(() => s.emit("image", { file, data }), 0);
   };
   return s;
 }
@@ -167,4 +168,23 @@ test("a cover answered inside the eufysecurity: wrapper is unwrapped and persist
   const written = fs.readFileSync(file);
   assert.deepEqual([...written.subarray(0, 2)], [0xff, 0xd8]);
   assert.equal(written.subarray(2, 2 + path.length).toString(), path);
+});
+
+test("a cover reply the SDK cannot decode is logged with its wrapper tag, never its serial", async () => {
+  const crop = "/media/mmcblk0p1/video/20261016131534_c00.jpg";
+  const station = fakeStation({ latest: latestFor(crop, 634) });
+  station.rawImage = Buffer.concat([
+    Buffer.from("v8_eufysecurity:T8010P0000000001:0123456789:", "latin1"),
+    Buffer.alloc(300, 7),
+  ]);
+  const { warm, log, file } = setup(station);
+
+  assert.equal(await run(() => warm.refreshLastEventImageFor("CAM1")), false);
+  assert.ok(!fs.existsSync(file));
+  const line = log.find((m) => m.startsWith("cover reply for 20261016131534_c00.jpg"));
+  assert.equal(
+    line,
+    `cover reply for 20261016131534_c00.jpg is not a JPEG after decoding (${station.rawImage.length}B, starts "v8_eufysecurity:")`,
+  );
+  assert.ok(!line.includes("T8010P0000000001"));
 });
