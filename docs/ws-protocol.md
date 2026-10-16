@@ -108,7 +108,8 @@ Every device the account exposes. _(Requires `auth.state == "ok"`.)_
       "codec": "camera",
       "capabilities": ["video","snapshot","motion","camera","rtsp","battery","light","ptz","audio","info"],
       "state": { "battery": 74, "motion": false, "light": true, "statusLed": true },
-      "stream": "/stream/EXAMPLE-CAM-0001"
+      "stream": "/stream/EXAMPLE-CAM-0001",
+      "power": "wired"
     },
     { "sn": "EXAMPLE-SENSOR-0002", "name": "Entry Sensor", "model": "T8900",
       "modelName": "Entry Sensor", "codec": "sensor",
@@ -124,6 +125,9 @@ Every device the account exposes. _(Requires `auth.state == "ok"`.)_
 - `stream` is present only on devices with live video (cameras/doorbells).
 - `streaming` (cameras/doorbells only) is `true` while a live P2P feed is actually open right now — the
   same signal the `streamState` event carries, so a frontend can seed a "Streaming" sensor from the list.
+- `power` (cameras/doorbells only) is `"battery"` or `"wired"`, decided the way the SDK decides it for its own
+  live-media budget. The `battery` capability alone is not the answer: mains-only models (the T8410 above) still
+  carry it.
 - `canReboot` is `true` on HomeBase/station devices, which accept `device.reboot`.
 - A device that failed to resolve appears as `{ "sn": "…", "error": "…" }`.
 
