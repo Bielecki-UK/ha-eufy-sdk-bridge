@@ -290,19 +290,39 @@ export function createWarmup(ctx) {
   /**
    * Request one on-HomeBase cover path over P2P and return its JPEG bytes (≤8s), or undefined. A
    * HomeBase 2 answers with the image inside the `eufysecurity:` wrapper, which is unwrapped with the
-   * station's `p2p_did` before the JPEG check.
+   * station's `p2p_did` before the JPEG check. A reply that is still not a JPEG after that is logged with
+   * its size and leading wrapper tag, so an image format the SDK cannot decode is told apart from no reply.
    */
   async function fetchImage(session, filePath, accountId, p2pDid) {
     const images = new Map();
+    let undecoded;
     const onImage = ({ file, data }) => {
       const image = data ? normalizePushImage(data, p2pDid) : data;
       if (image?.[0] === 0xff && image?.[1] === 0xd8) images.set(file, image);
+      else if (file === filePath && data) undecoded = Buffer.from(data);
     };
     session.on("image", onImage);
     session.requestImage(filePath, { accountId });
     for (let i = 0; i < 40 && !images.has(filePath); i++) await sleep(200);
     session.off?.("image", onImage);
+    if (!images.has(filePath) && undecoded) {
+      ctx.eventLog?.(
+        `cover reply for ${filePath.split("/").pop()} is not a JPEG after decoding (${undecoded.length}B, starts ${wrapperTag(undecoded)})`,
+      );
+    }
     return images.get(filePath);
+  }
+
+  /**
+   * The leading tag of an image reply: the printable text up to and including its first `:` within 24 bytes
+   * (`v8_eufysecurity:`), else the first 8 bytes as hex. Stops at the first `:`, so the serial and code a
+   * wrapper carries after it are never logged.
+   */
+  function wrapperTag(buf) {
+    const head = buf.subarray(0, 24).toString("latin1");
+    const colon = head.indexOf(":");
+    if (colon > 0 && /^[\x20-\x7e]+$/.test(head.slice(0, colon))) return `"${head.slice(0, colon + 1)}"`;
+    return `0x${buf.subarray(0, 8).toString("hex")}`;
   }
 
   /** Persist bytes to last-event-<sn>.jpg only when they differ from what's on disk; report whether it changed. */
