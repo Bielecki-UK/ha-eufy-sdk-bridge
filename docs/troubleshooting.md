@@ -51,8 +51,11 @@ The camera acknowledges the command but doesn't act on it. Two known causes:
   currently sends and expect the eufy app's form instead. A fix for the T8410C is in
   [eufy-sdk#448](https://github.com/mega-yfue/eufy-sdk/pull/448), and other models may need the
   same change.
-- **Live view:** the camera never sets up the key exchange the SDK expects. This is being
-  investigated in [eufy-sdk#325](https://github.com/mega-yfue/eufy-sdk/issues/325).
+- **Live view:** some standalone cameras expect a different live-start command from the one the
+  SDK sends, so they never stream. For the T8200 doorbell the app's command has been captured and a
+  fix is being prepared ([eufy-sdk#325](https://github.com/mega-yfue/eufy-sdk/issues/325),
+  [eufy-sdk#446](https://github.com/mega-yfue/eufy-sdk/issues/446)). Other models are still
+  under investigation in #325.
 
 Turning off **Local Advanced Encryption** in the eufy app does not help: affected cameras fail the
 same way with it off. If you see this, please add your camera model and a `debug_p2p` log to the
