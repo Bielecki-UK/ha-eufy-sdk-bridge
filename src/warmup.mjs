@@ -47,6 +47,7 @@ const FORCE_REFRESH_ANSWER_MS = Number(process.env.EVENT_IMAGE_FORCE_REFRESH_ANS
 
 export function createWarmup(ctx) {
   const { eufy, eventImageDir } = ctx;
+  const vaultPassword = ctx.cfg?.vaultPassword; // EXPERIMENTAL v8 decode (owner vault password), off unless set
   const { faceNames } = ctx.state;
   const storedThumbSeen = ctx.state.storedThumbSeen ?? new Map();
 
@@ -309,6 +310,23 @@ export function createWarmup(ctx) {
       ctx.eventLog?.(
         `cover reply for ${filePath.split("/").pop()} is not a JPEG after decoding (${undecoded.length}B, starts ${wrapperTag(undecoded)})`,
       );
+      // EXPERIMENTAL: a v8 cover is encrypted to the account's vault key. If the owner configured their
+      // vault password, retry through the owner-authorised vault path, which fetches the account key and
+      // self-verifies the unwrap against the account public key before decoding. Logs the outcome so a
+      // one-off run on a real v8 account reveals the unwrap scheme.
+      if (vaultPassword && undecoded.subarray(0, 16).toString("latin1") === "v8_eufysecurity:") {
+        try {
+          const out = await eufy.experimentalDecodeV8Cover(undecoded, vaultPassword);
+          if (out?.jpeg?.[0] === 0xff && out.jpeg[1] === 0xd8) {
+            ctx.eventLog?.(`[v8-experiment] decoded OK via vault (scheme=${out.scheme}, ${out.jpeg.length}B)`);
+            images.set(filePath, Buffer.from(out.jpeg));
+          } else {
+            ctx.eventLog?.(`[v8-experiment] not decoded — stopped at ${out?.phase}: ${out?.detail ?? ""}`);
+          }
+        } catch (e) {
+          ctx.eventLog?.(`[v8-experiment] error: ${e?.message ?? e}`);
+        }
+      }
     }
     return images.get(filePath);
   }

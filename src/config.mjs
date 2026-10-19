@@ -124,6 +124,10 @@ export function loadConfig(env = process.env) {
     // holds a battery camera's radio open for ~28s per event. Set BRIDGE_PREWARM=1 to enable the SDK's
     // default pre-warm events.
     prewarm: truthy(env.BRIDGE_PREWARM),
+    // EXPERIMENTAL (v8 covers): the owner's Local-Advanced-Encryption vault password. When set, a v8
+    // (`v8_eufysecurity:`) cover the SDK cannot decode keyless is retried through the owner-authorised
+    // vault path (fetch the account's vault key by this password, self-verify, decode). Off unless set.
+    vaultPassword: env.EUFY_VAULT_PASSWORD || undefined,
     // Optional Anker Solix support — a SEPARATE Anker account (its own login + device backend), enabled
     // only when both SOLIX_EMAIL and SOLIX_PASSWORD are set. Independent of the eufy client; its own
     // persisted session file. Country falls back to the eufy country.
