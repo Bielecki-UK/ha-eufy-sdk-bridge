@@ -61,6 +61,11 @@ export function createDeviceView(ctx) {
     if (typeof lastSeenMs === "number") out.lastSeenMs = lastSeenMs;
     const availability = eufy.deviceAvailability?.(sn)?.availability;
     if (availability === "available" || availability === "unavailable") out.availability = availability;
+    // A P2P session keyed by the device's OWN serial means a STANDALONE device with a live transport —
+    // proof it is reachable right now, even while it only sends transport keepalives and no param frames
+    // (so `lastSeenMs` stays put). A HomeBase-attached device's session is keyed by the HomeBase, not by
+    // the device, so this never fires for a child camera — a parent being up does not prove the child is.
+    if (eufy.getP2pSessions?.().get(sn)?.isConnected === true) out.p2pReachable = true;
     return out;
   }
 

@@ -24,6 +24,7 @@ function view(liveness) {
     async getDevice(sn) {
       return fakeDevice(sn);
     },
+    getP2pSessions: () => new Map(),
     ...liveness,
   };
   return createDeviceView({ eufy, state: { streaming: new Set() } });
@@ -52,9 +53,29 @@ test("device view omits the liveness facts the SDK has nothing to report", async
 });
 
 test("device view works against an SDK that lacks the liveness accessors", async () => {
-  const { describeDevice } = view({}); // no deviceState / deviceAvailability
+  const { describeDevice } = view({ getP2pSessions: undefined }); // older SDK
   const rec = await describeDevice("CAM1");
   assert.ok(!("lastSeenMs" in rec));
   assert.ok(!("availability" in rec));
+  assert.ok(!("p2pReachable" in rec));
   assert.equal(rec.sn, "CAM1"); // the rest of the record is unaffected
+});
+
+test("device view reports p2pReachable for a standalone device with a live session", async () => {
+  // A session keyed by the device's own serial = a standalone device whose transport is up.
+  const { describeDevice } = view({
+    getP2pSessions: () => new Map([["CAM1", { isConnected: true }]]),
+  });
+  const rec = await describeDevice("CAM1");
+  assert.equal(rec.p2pReachable, true);
+});
+
+test("device view omits p2pReachable when only the HomeBase (not the device) has a session", async () => {
+  // The session is keyed by the parent station, not the child camera — a parent being up does not
+  // prove the child is, so the field stays absent.
+  const { describeDevice } = view({
+    getP2pSessions: () => new Map([["HB1", { isConnected: true }]]),
+  });
+  const rec = await describeDevice("CAM1");
+  assert.ok(!("p2pReachable" in rec));
 });
