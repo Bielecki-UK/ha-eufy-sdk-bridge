@@ -6,6 +6,9 @@ const base = { EUFY_EMAIL: "x@y.z", EUFY_PASSWORD: "pw" };
 
 test("event pre-warm is OFF by default", () => {
   assert.equal(loadConfig(base).cfg.prewarm, false); // → client passes prewarmEvents: []
+  assert.equal(loadConfig(base).cfg.localEventRefresh, true); // default on
+  assert.equal(loadConfig({ ...base, EUFY_LOCAL_EVENT_REFRESH: "0" }).cfg.localEventRefresh, false);
+  assert.equal(loadConfig({ ...base, EUFY_LOCAL_EVENT_REFRESH: "off" }).cfg.localEventRefresh, false);
 });
 
 test("BRIDGE_PREWARM=1 turns pre-warm on (SDK default events)", () => {

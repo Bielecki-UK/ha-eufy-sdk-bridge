@@ -124,6 +124,13 @@ export function loadConfig(env = process.env) {
     // holds a battery camera's radio open for ~28s per event. Set BRIDGE_PREWARM=1 to enable the SDK's
     // default pre-warm events.
     prewarm: truthy(env.BRIDGE_PREWARM),
+    // "Last event" local-cover refresh over P2P. On every detection the bridge queries the HomeBase's
+    // history DB + local cover (and warms the face roster + last-event images at startup, and auto-heals
+    // /event-image). On a camera with no readable local storage (e.g. a standalone mains T8423, no
+    // HomeBase) those queries return nothing yet still fire ~26 P2P requests over ~4.5 min per detection —
+    // which can hammer the camera into going offline. Set EUFY_LOCAL_EVENT_REFRESH=0 to skip them all
+    // (the push-thumbnail path and live streaming are unaffected). Default ON. See bridge #139.
+    localEventRefresh: env.EUFY_LOCAL_EVENT_REFRESH == null ? true : truthy(env.EUFY_LOCAL_EVENT_REFRESH),
     // Optional Anker Solix support — a SEPARATE Anker account (its own login + device backend), enabled
     // only when both SOLIX_EMAIL and SOLIX_PASSWORD are set. Independent of the eufy client; its own
     // persisted session file. Country falls back to the eufy country.
