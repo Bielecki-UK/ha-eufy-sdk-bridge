@@ -53,6 +53,10 @@ export const DETECTION_EVENTS = new Set([
   "cryingDetected",
 ]);
 
+// HomeBase 3 `history_record_info.trigger_type`: 2 = motion recording, 4 = person recording (bridge #35,
+// confirmed against a person-only vs all-motion camera pair). Drives the opt-in night-vision upgrade.
+export const RECORD_TRIGGER_PERSON = 4;
+
 export const PUSH_STALL_MS = 5 * 60_000; // push down (or never up) this long ⇒ events are dead ⇒ recover
 export const SUSPEND_RELEASE_MS = 30_000; // no /stream pull this long while suspended ⇒ nobody's watching
 export const STREAM_FAIL_BACKOFF_MAX_MS = 5 * 60_000; // cap on the exponential backoff after failed opens
@@ -124,6 +128,13 @@ export function loadConfig(env = process.env) {
     // holds a battery camera's radio open for ~28s per event. Set BRIDGE_PREWARM=1 to enable the SDK's
     // default pre-warm events.
     prewarm: truthy(env.BRIDGE_PREWARM),
+    // Night-vision person-vs-motion: a camera unsure at trigger time pushes `motion` (3101) and only tags
+    // the clip "person" after it analyses the recording — so HA shows motion for what the app calls a
+    // person. When on, a `motion` push triggers a read of the freshest `history_record_info` record and,
+    // if its `trigger_type` says person, the bridge re-emits `personDetected` (name "Unknown" — HB3 records
+    // carry no person_id). Confirmed on HomeBase 3 (trigger_type 2=motion, 4=person); HB2's values are
+    // unverified, so this is OFF by default. See bridge #35.
+    personFromRecord: truthy(env.EUFY_PERSON_FROM_RECORD),
     // Optional Anker Solix support — a SEPARATE Anker account (its own login + device backend), enabled
     // only when both SOLIX_EMAIL and SOLIX_PASSWORD are set. Independent of the eufy client; its own
     // persisted session file. Country falls back to the eufy country.
