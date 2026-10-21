@@ -663,14 +663,22 @@ export function createWarmup(ctx) {
       .finally(() => pendingRefresh.delete(sn));
   }
 
+  // EUFY_LOCAL_EVENT_REFRESH=0 (bridge #139): skip the HomeBase/local-storage P2P reads for an account
+  // where they return nothing but still hammer the camera — the on-detection cover refresh, the startup
+  // face-roster + last-event warm-ups, and the /event-image auto-heal. The push-thumbnail path
+  // (refreshStoredSnapshotFor), explicit /event-image force (forceRefreshEventImage) and live streaming
+  // are untouched.
+  const localEventRefresh = ctx.localEventRefresh !== false;
+  const noop = () => {};
+  const noopAsync = async () => {};
   return {
-    warmFaceRoster,
-    warmLastEventImages,
+    warmFaceRoster: localEventRefresh ? warmFaceRoster : noopAsync,
+    warmLastEventImages: localEventRefresh ? warmLastEventImages : noopAsync,
     refreshLastEventImageFor,
     refreshStoredSnapshotFor,
-    onDetectionRefresh,
+    onDetectionRefresh: localEventRefresh ? onDetectionRefresh : noop,
     forceRefreshEventImage,
-    autoHealEventImage,
+    autoHealEventImage: localEventRefresh ? autoHealEventImage : noop,
     latestTriggerType,
   };
 }
