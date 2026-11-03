@@ -8,6 +8,7 @@ import { streamClientFor, dropStreamClient, isSupersededStreamClient } from "../
 import { createLiveStillTap } from "./live-still.mjs";
 import { onBatteryPower } from "./power.mjs";
 import { storedThumbnailSeenAt } from "./stored-thumbnail.mjs";
+import { recordingStartFor } from "./recording-start.mjs";
 import { redactSecrets } from "./redact.mjs";
 
 function json(res, code, body) {
@@ -235,6 +236,11 @@ export function createHttpHandler(ctx) {
       // HA fetches this to render "Last event" (usually right after a detection event). Trace the
       // outcome so a "Last event never updates" report shows whether HA even asked and what it got back.
       const file = path.join(eventImageDir, `last-event-${sn}.jpg`);
+      // A local cover served from disk carries its recording's start time (camera local time, no offset).
+      const coverHeaders = (data) => {
+        const recordingStart = recordingStartFor(eventImageDir, sn, data);
+        return recordingStart ? { "x-recording-start": recordingStart } : {};
+      };
       try {
         const cam = (await eufy.getDevice(sn)).camera?.();
         if (!cam?.snapshotStored) {
@@ -252,7 +258,7 @@ export function createHttpHandler(ctx) {
           ctx.eventLog(
             `/event-image ${sn} → 200 local cover (${newer.length}B, from disk; newer than the retained push thumbnail) — Last event served`,
           );
-          res.writeHead(200, { "content-type": "image/jpeg", "content-length": newer.length });
+          res.writeHead(200, { "content-type": "image/jpeg", "content-length": newer.length, ...coverHeaders(newer) });
           return res.end(newer);
         }
         fs.writeFile(file, jpeg, () => {}); // best-effort persist for restart survival
@@ -274,7 +280,11 @@ export function createHttpHandler(ctx) {
           // HA's periodic image re-pulls — advance "Last event" once the crop lands, without the manual
           // "Refresh Last Event" button. Fire-and-forget: we serve the current copy right now regardless.
           ctx.autoHealEventImage?.(sn);
-          res.writeHead(200, { "content-type": "image/jpeg", "content-length": cached.length });
+          res.writeHead(200, {
+            "content-type": "image/jpeg",
+            "content-length": cached.length,
+            ...coverHeaders(cached),
+          });
           return res.end(cached);
         } catch {
           // No live and no persisted image. Surface the SDK reason (not-observed / pending /

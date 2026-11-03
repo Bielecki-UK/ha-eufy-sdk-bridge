@@ -8,6 +8,7 @@ import { normalizePushImage } from "@mega-yfue/eufy-sdk";
 import path from "node:path";
 import { rosterEntry, firstJsonObject } from "./faces.mjs";
 import { storedThumbnailSeenAt } from "./stored-thumbnail.mjs";
+import { noteRecordingStart } from "./recording-start.mjs";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -388,6 +389,7 @@ export function createWarmup(ctx) {
             if (data) noteFetched(covers.get(dsn).rec, filePath);
             else ctx.eventLog?.(`warm: ${dsn} — cover fetch returned no image (crop=${filePath.split("/").pop()})`);
             if (data && persistIfChanged(dsn, data)) {
+              noteRecordingStart(eventImageDir, dsn, data, filePath);
               console.log(`[bridge] warmed last-event image for ${dsn} (${data.length}B, local)`);
             }
           }
@@ -439,6 +441,7 @@ export function createWarmup(ctx) {
           }
           noteFetched(entry.rec, filePath);
           if (persistIfChanged(sn, data)) {
+            noteRecordingStart(eventImageDir, sn, data, filePath);
             ctx.eventLog?.(
               `local refresh: ${sn} → last-event image updated (${data.length}B, local) ` +
                 `[ts=${entry.ts} crop=${crop} of ${recordCount} recs]`,
