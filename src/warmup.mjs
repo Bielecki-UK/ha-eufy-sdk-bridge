@@ -8,7 +8,7 @@ import { normalizePushImage } from "@mega-yfue/eufy-sdk";
 import path from "node:path";
 import { rosterEntry, firstJsonObject } from "./faces.mjs";
 import { storedThumbnailSeenAt } from "./stored-thumbnail.mjs";
-import { noteRecordingStart } from "./recording-start.mjs";
+import { noteRecordingStart, recordingStartOf, recordsOnlyOnDetection } from "./recording-start.mjs";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -283,6 +283,18 @@ export function createWarmup(ctx) {
   }
 
   /** A station's `p2p_did`, the key a stored image's `eufysecurity:` wrapper is decoded with. */
+  /**
+   * Broadcast `recordingFound` for a new local cover's recording, with its start (camera local time), when
+   * the device's model records only on a detection. A consumer decides whether a push already announced it.
+   */
+  function announceRecording(devs, sn, coverPath) {
+    const d = devs.find((x) => (x.sn ?? x.serialNumber) === sn);
+    const recordingStart = recordingStartOf(coverPath);
+    if (recordingStart && recordsOnlyOnDetection(d?.raw?.device_model ?? d?.model)) {
+      ctx.broadcast?.({ event: "recordingFound", deviceSn: sn, recordingStart });
+    }
+  }
+
   function p2pDidOf(devs, stationSn) {
     const d = devs.find((x) => (x.sn ?? x.serialNumber) === stationSn);
     return d?.p2pDid ?? d?.raw?.p2p_did;
@@ -390,6 +402,7 @@ export function createWarmup(ctx) {
             else ctx.eventLog?.(`warm: ${dsn} — cover fetch returned no image (crop=${filePath.split("/").pop()})`);
             if (data && persistIfChanged(dsn, data)) {
               noteRecordingStart(eventImageDir, dsn, data, filePath);
+              announceRecording(devs, dsn, filePath);
               console.log(`[bridge] warmed last-event image for ${dsn} (${data.length}B, local)`);
             }
           }
@@ -442,6 +455,7 @@ export function createWarmup(ctx) {
           noteFetched(entry.rec, filePath);
           if (persistIfChanged(sn, data)) {
             noteRecordingStart(eventImageDir, sn, data, filePath);
+            announceRecording(devs, sn, filePath);
             ctx.eventLog?.(
               `local refresh: ${sn} → last-event image updated (${data.length}B, local) ` +
                 `[ts=${entry.ts} crop=${crop} of ${recordCount} recs]`,

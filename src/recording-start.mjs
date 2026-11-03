@@ -53,3 +53,14 @@ export function recordingStartFor(dir, sn, data) {
     return undefined;
   }
 }
+
+// Models whose recordings are made only on a detection, so that a new recording means one. A camera that
+// can record continuously would make a "new recording" mean nothing, and no device reports whether it
+// does (a T8200 reports no recording-mode parameter at all), so a model joins only once measured. T8200:
+// its recordings are irregular, and each pushed detection came 4–12 s after a recording started.
+const DETECTION_ONLY_RECORDING_MODELS = new Set(["T8200"]);
+
+/** Whether a new recording by this model means a detection. */
+export function recordsOnlyOnDetection(model) {
+  return DETECTION_ONLY_RECORDING_MODELS.has(model);
+}

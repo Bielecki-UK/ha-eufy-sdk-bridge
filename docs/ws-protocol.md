@@ -424,6 +424,25 @@ Full set: `propertyChanged`, `motion`, `personDetected`, `strangerDetected`, `do
 `vehicleDetected`, `dogDetected`, `armingModeChanged`, `alarm`, `lockState`, `contactState`,
 `batteryLevel`, `batteryAlert`, `ptzNotify`, `smartLightState`.
 
+### Bridge events
+
+Raised by the bridge itself, not forwarded from the SDK.
+
+| event               | payload                        | when                                                                    |
+| ------------------- | ------------------------------ | ----------------------------------------------------------------------- |
+| `eventImageUpdated` | `{ deviceSn }`                 | a newer "Last event" image landed; re-fetch `GET /event-image/<sn>`     |
+| `recordingFound`    | `{ deviceSn, recordingStart }` | polling found a new recording on a model that records only on detection |
+
+`recordingStart` is the recording's start as `YYYY-MM-DDTHH:MM:SS` in the camera's local time, with no offset,
+like `x-recording-start`. A push may already have announced the same detection: a pushed detection on a T8200
+arrived 4–12 s after its recording started, so the consumer decides whether this one is new. It is raised only
+for models measured to record only on a detection (`T8200`), since a camera recording continuously would make
+a new recording mean nothing, and no device reports which it does.
+
+```json
+{ "event": "recordingFound", "deviceSn": "EXAMPLE-DOORBELL…", "recordingStart": "2026-11-02T23:42:51" }
+```
+
 ### Anker Solix events
 
 Present only when Solix is configured (`SOLIX_*`).
